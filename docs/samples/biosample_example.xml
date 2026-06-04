@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BioSampleSet>
+  <BioSample accession="SAMN00000001" submission_date="2026-06-01" last_update="2026-06-02" status="live">
+    <Description><Organism taxonomy_id="573"><OrganismName>Klebsiella pneumoniae</OrganismName></Organism></Description>
+    <Links><Link target="bioproject">PRJNA000001</Link></Links>
+    <Attributes>
+      <Attribute attribute_name="collection_date">2026-05-20</Attribute>
+      <Attribute attribute_name="geo_loc_name">Saudi Arabia: Riyadh</Attribute>
+      <Attribute attribute_name="lat_lon">24.7136 N 46.6753 E</Attribute>
+      <Attribute attribute_name="host">Homo sapiens</Attribute>
+      <Attribute attribute_name="isolation_source">clinical sample</Attribute>
+      <Attribute attribute_name="strain">KP-001</Attribute>
+      <Attribute attribute_name="laboratory">Example Genomics Lab</Attribute>
+    </Attributes>
+  </BioSample>
+  <BioSample accession="SAMN00000002" submission_date="2026-06-02" last_update="2026-06-03" status="live">
+    <Description><Organism taxonomy_id="29459"><OrganismName>Brucella melitensis</OrganismName></Organism></Description>
+    <Links><Link target="bioproject">PRJNA000002</Link></Links>
+    <Attributes>
+      <Attribute attribute_name="collection_date">2026-05-21</Attribute>
+      <Attribute attribute_name="geo_loc_name">Saudi Arabia: Makkah</Attribute>
+      <Attribute attribute_name="host">Capra hircus</Attribute>
+      <Attribute attribute_name="isolation_source">milk</Attribute>
+      <Attribute attribute_name="strain">BM-002</Attribute>
+      <Attribute attribute_name="laboratory">Example Public Health Lab</Attribute>
+    </Attributes>
+  </BioSample>
+</BioSampleSet>

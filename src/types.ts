@@ -31,6 +31,7 @@ export type NcbiRecord = {
   laboratory?: string;
   institution?: string;
   organization?: string;
+  owner?: string;
   submitter?: string;
   submissionDate?: string;
   publicationDate?: string;

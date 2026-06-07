@@ -105,6 +105,14 @@ function detect(xml: string): string {
   return 'Generic';
 }
 
+function ownerValue(block: string, attrs: Record<string, string>): string | undefined {
+  return pick(attrs, [
+    'owner', 'owner name', 'owner_name', 'sample owner', 'data owner', 'contact', 'contact name',
+    'submitter_name', 'submitter name', 'submitter', 'organization', 'submitter organization',
+    'institution', 'institute', 'center name', 'sequencing center'
+  ]) || tag(block, 'Owner') || tag(block, 'Contact') || tag(block, 'Submitter') || tag(block, 'Organization') || tag(block, 'CENTER_NAME');
+}
+
 function parseBioSample(block: string, sourceFile: string, index: number): NcbiRecord {
   const a = attributes(block);
   const geoValue = pick(a, ['geo_loc_name', 'geographic location', 'country']);
@@ -114,6 +122,8 @@ function parseBioSample(block: string, sourceFile: string, index: number): NcbiR
   const latlonValue = pick(a, ['lat_lon', 'latitude and longitude', 'lat lon']);
   const laboratory = pick(a, ['lab', 'laboratory', 'collecting lab', 'collected by', 'sequencing center', 'center name', 'submitter lab']);
   const organization = tag(block, 'Organization') || pick(a, ['organization', 'submitter organization', 'center name']);
+  const submitter = tag(block, 'Submitter') || pick(a, ['submitter', 'submitter name', 'submitter_name']);
+  const owner = ownerValue(block, a);
   return {
     id: `${sourceFile}-${index}`,
     sourceFile,
@@ -141,7 +151,8 @@ function parseBioSample(block: string, sourceFile: string, index: number): NcbiR
     laboratory,
     institution: pick(a, ['institution', 'institute', 'affiliation']),
     organization,
-    submitter: tag(block, 'Submitter') || pick(a, ['submitter']),
+    owner,
+    submitter,
     submissionDate: attr(block, 'submission_date') || tag(block, 'SubmissionDate'),
     publicationDate: attr(block, 'publication_date') || tag(block, 'PublicationDate'),
     lastUpdateDate: attr(block, 'last_update') || attr(block, 'last_update_date'),
@@ -157,6 +168,9 @@ function parseGeneric(block: string, sourceFile: string, index: number, fileType
   const geoValue = pick(a, ['geo_loc_name', 'country']);
   const collectionDate = pick(a, ['collection_date', 'collection date']);
   const organism = tag(block, 'Organism') || tag(block, 'ScientificName') || tag(block, 'GBSeq_organism') || pick(a, ['organism']);
+  const organization = tag(block, 'CENTER_NAME') || tag(block, 'Submitter') || pick(a, ['organization']);
+  const submitter = tag(block, 'Submitter') || pick(a, ['submitter', 'submitter name', 'submitter_name']);
+  const owner = ownerValue(block, a);
   return {
     id: `${sourceFile}-${index}`,
     sourceFile,
@@ -176,8 +190,9 @@ function parseGeneric(block: string, sourceFile: string, index: number, fileType
     isolationSource: pick(a, ['isolation_source', 'isolation source']),
     strain: pick(a, ['strain']),
     laboratory: pick(a, ['lab', 'laboratory', 'collecting lab', 'sequencing center', 'center name']),
-    organization: tag(block, 'CENTER_NAME') || tag(block, 'Submitter') || pick(a, ['organization']),
-    submitter: tag(block, 'Submitter'),
+    organization,
+    owner,
+    submitter,
     submissionDate: tag(block, 'SubmissionDate') || tag(block, 'CREATE_DATE'),
     lastUpdateDate: tag(block, 'UPDATE_DATE') || tag(block, 'LastUpdateDate'),
     recordStatus: tag(block, 'Status'),

@@ -60,7 +60,7 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; }
 th { position: sticky; top: 0; z-index: 1; background: var(--card); }
 .virtual-table { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--card); }
-.virtual-header, .virtual-row { display: grid; grid-template-columns: 150px 210px 120px 160px 160px 130px 130px 130px 120px 140px 220px 220px 220px 180px 180px; min-width: 2540px; }
+.virtual-header, .virtual-row { display: grid; grid-template-columns: 150px 210px 120px 160px 160px 130px 130px 130px 120px 140px 220px 220px 220px 220px 180px 180px; min-width: 2760px; }
 .virtual-header { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--line); font-weight: 900; font-size: 13px; }
 .virtual-header div, .virtual-row div { padding: 10px; border-right: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .virtual-body { overflow: auto; position: relative; }

@@ -87,18 +87,34 @@ function ProgressPanel({ progress }: { progress: ParseProgress | null }) {
 }
 
 function VirtualTable({ records, maxHeight = 560 }: { records: NcbiRecord[]; maxHeight?: number }) {
-  const rowHeight = 42;
+  const rowHeight = 44;
+  const headerRef = React.useRef<HTMLDivElement | null>(null);
+  const bodyRef = React.useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = React.useState(0);
-  const visibleCount = Math.ceil(maxHeight / rowHeight) + 8;
-  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 4);
+  const visibleCount = Math.ceil(maxHeight / rowHeight) + 10;
+  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 5);
   const end = Math.min(records.length, start + visibleCount);
   const visible = records.slice(start, end);
 
+  function handleScroll(event: React.UIEvent<HTMLDivElement>) {
+    const target = event.currentTarget;
+    setScrollTop(target.scrollTop);
+    if (headerRef.current) headerRef.current.scrollLeft = target.scrollLeft;
+  }
+
+  React.useEffect(() => {
+    setScrollTop(0);
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+    if (headerRef.current) headerRef.current.scrollLeft = 0;
+  }, [records]);
+
   return <div className="virtual-table">
-    <div className="virtual-header">{tableFields.map(f => <div key={f}>{f}</div>)}</div>
-    <div className="virtual-body" style={{ maxHeight }} onScroll={e => setScrollTop(e.currentTarget.scrollTop)}>
-      <div style={{ height: records.length * rowHeight, position: 'relative' }}>
-        {visible.map((record, i) => <div className="virtual-row" key={record.id || start + i} style={{ transform: `translateY(${(start + i) * rowHeight}px)` }}>
+    <div className="virtual-header-scroll" ref={headerRef} aria-hidden="true">
+      <div className="virtual-grid virtual-header">{tableFields.map(f => <div key={f}>{f}</div>)}</div>
+    </div>
+    <div className="virtual-body" ref={bodyRef} style={{ maxHeight }} onScroll={handleScroll}>
+      <div className="virtual-spacer" style={{ height: Math.max(records.length * rowHeight, rowHeight) }}>
+        {visible.map((record, i) => <div className="virtual-grid virtual-row" key={record.id || start + i} style={{ transform: `translateY(${(start + i) * rowHeight}px)` }}>
           {tableFields.map(f => <div key={f} title={String(record[f] || '')}>{String(record[f] || '')}</div>)}
         </div>)}
       </div>
@@ -107,7 +123,7 @@ function VirtualTable({ records, maxHeight = 560 }: { records: NcbiRecord[]; max
 }
 
 function HostLabTable({ rows }: { rows: ReturnType<typeof hostLabRows> }) {
-  return <div className="table-wrap"><table><thead><tr><th>Host</th><th>Records</th><th>Lab count</th><th>Owner count</th><th>Lab names</th><th>Owners</th><th>Countries</th><th>Organisms</th></tr></thead><tbody>{rows.slice(0, 500).map(row => <tr key={row.host}><td>{row.host}</td><td>{row.records.toLocaleString()}</td><td>{row.labCount}</td><td>{row.ownerCount}</td><td>{row.labs}</td><td>{row.owners}</td><td>{row.countries}</td><td>{row.organisms}</td></tr>)}</tbody></table></div>;
+  return <div className="table-wrap"><table className="wide-table"><thead><tr><th>Host</th><th>Records</th><th>Lab count</th><th>Owner count</th><th>Lab names</th><th>Owners</th><th>Countries</th><th>Organisms</th></tr></thead><tbody>{rows.slice(0, 500).map(row => <tr key={row.host}><td>{row.host}</td><td>{row.records.toLocaleString()}</td><td>{row.labCount}</td><td>{row.ownerCount}</td><td>{row.labs}</td><td>{row.owners}</td><td>{row.countries}</td><td>{row.organisms}</td></tr>)}</tbody></table></div>;
 }
 
 export default function App() {

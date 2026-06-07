@@ -1,9 +1,14 @@
 import type { NcbiRecord, ParseProgress, ParseResult } from '../types';
 
-type UploadFile = File | { name: string; text: string; size?: number };
+type LegacyTextUpload = { name: string; text: string; size?: number };
+type UploadFile = File | LegacyTextUpload;
 
 const LARGE_FILE_BYTES = 25 * 1024 * 1024;
 const LARGE_FILE_RECORDS = 50000;
+
+function isLegacyTextUpload(file: UploadFile): file is LegacyTextUpload {
+  return typeof (file as { text?: unknown }).text === 'string';
+}
 
 function clean(value?: string | null): string | undefined {
   const out = (value || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
@@ -222,7 +227,7 @@ function sendProgress(progress: ParseProgress) {
 
 async function parseUpload(file: UploadFile, fileIndex: number, fileCount: number): Promise<{ records: NcbiRecord[]; errors: string[]; largeFileMode: boolean }> {
   const name = file.name;
-  const size = 'size' in file && file.size ? file.size : ('text' in file ? file.text.length : 0);
+  const size = 'size' in file && typeof file.size === 'number' ? file.size : (isLegacyTextUpload(file) ? file.text.length : 0);
   const largeFileMode = size >= LARGE_FILE_BYTES;
   const records: NcbiRecord[] = [];
   const errors: string[] = [];
@@ -279,7 +284,7 @@ async function parseUpload(file: UploadFile, fileIndex: number, fileCount: numbe
     return { records, errors, largeFileMode: largeFileMode || records.length >= LARGE_FILE_RECORDS };
   }
 
-  const text = 'text' in file ? file.text : '';
+  const text = isLegacyTextUpload(file) ? file.text : ('text' in file && typeof file.text === 'function' ? await file.text() : '');
   records.push(...parseBlocks(text, name));
   if (!records.length) errors.push(`${name}: no recognizable NCBI records found`);
   return { records, errors, largeFileMode: largeFileMode || records.length >= LARGE_FILE_RECORDS };

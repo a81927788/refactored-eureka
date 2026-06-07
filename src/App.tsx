@@ -20,7 +20,7 @@ const markerIcon = new L.Icon({
   iconAnchor: [12, 41]
 });
 
-const tableFields = ['accession','organism','taxonomyId','bioSampleAccession','bioProjectAccession','collectionDate','country','region','city','host','laboratory','institution','organization','isolationSource','sourceFile'] as (keyof NcbiRecord)[];
+const tableFields = ['accession','organism','taxonomyId','bioSampleAccession','bioProjectAccession','collectionDate','country','region','city','host','laboratory','institution','organization','owner','isolationSource','sourceFile'] as (keyof NcbiRecord)[];
 
 function chartData(pairs: [string, number][], label = 'Records') {
   const top = pairs.slice(0, 12);
@@ -42,18 +42,21 @@ function snapshotRows(records: NcbiRecord[]): NcbiRecord[] {
     country: `${new Set(rows.map(r => r.country).filter(Boolean)).size} countries`,
     host: `${new Set(rows.map(r => r.host).filter(Boolean)).size} hosts`,
     laboratory: `${new Set(rows.map(r => r.laboratory || r.institution || r.organization).filter(Boolean)).size} labs`,
+    owner: `${new Set(rows.map(r => r.owner).filter(Boolean)).size} owners`,
     bioProjectAccession: `${new Set(rows.map(r => r.bioProjectAccession).filter(Boolean)).size} BioProjects`
   }));
 }
 
 function hostLabRows(records: NcbiRecord[]) {
-  const map = new Map<string, { records: number; labs: Set<string>; countries: Set<string>; organisms: Set<string> }>();
+  const map = new Map<string, { records: number; labs: Set<string>; owners: Set<string>; countries: Set<string>; organisms: Set<string> }>();
   for (const record of records) {
     const host = record.host || record.hostSpecies || 'Unknown host';
     const lab = record.laboratory || record.institution || record.organization || 'Unknown lab';
-    const entry = map.get(host) || { records: 0, labs: new Set<string>(), countries: new Set<string>(), organisms: new Set<string>() };
+    const owner = record.owner || record.submitter || record.organization || 'Unknown owner';
+    const entry = map.get(host) || { records: 0, labs: new Set<string>(), owners: new Set<string>(), countries: new Set<string>(), organisms: new Set<string>() };
     entry.records += 1;
     entry.labs.add(lab);
+    entry.owners.add(owner);
     if (record.country) entry.countries.add(record.country);
     if (record.organism) entry.organisms.add(record.organism);
     map.set(host, entry);
@@ -62,7 +65,9 @@ function hostLabRows(records: NcbiRecord[]) {
     host,
     records: value.records,
     labCount: value.labs.size,
+    ownerCount: value.owners.size,
     labs: [...value.labs].sort().slice(0, 30).join('; '),
+    owners: [...value.owners].sort().slice(0, 30).join('; '),
     countries: value.countries.size,
     organisms: value.organisms.size
   })).sort((a, b) => b.records - a.records);
@@ -102,7 +107,7 @@ function VirtualTable({ records, maxHeight = 560 }: { records: NcbiRecord[]; max
 }
 
 function HostLabTable({ rows }: { rows: ReturnType<typeof hostLabRows> }) {
-  return <div className="table-wrap"><table><thead><tr><th>Host</th><th>Records</th><th>Lab count</th><th>Lab names</th><th>Countries</th><th>Organisms</th></tr></thead><tbody>{rows.slice(0, 500).map(row => <tr key={row.host}><td>{row.host}</td><td>{row.records.toLocaleString()}</td><td>{row.labCount}</td><td>{row.labs}</td><td>{row.countries}</td><td>{row.organisms}</td></tr>)}</tbody></table></div>;
+  return <div className="table-wrap"><table><thead><tr><th>Host</th><th>Records</th><th>Lab count</th><th>Owner count</th><th>Lab names</th><th>Owners</th><th>Countries</th><th>Organisms</th></tr></thead><tbody>{rows.slice(0, 500).map(row => <tr key={row.host}><td>{row.host}</td><td>{row.records.toLocaleString()}</td><td>{row.labCount}</td><td>{row.ownerCount}</td><td>{row.labs}</td><td>{row.owners}</td><td>{row.countries}</td><td>{row.organisms}</td></tr>)}</tbody></table></div>;
 }
 
 export default function App() {
@@ -168,7 +173,7 @@ export default function App() {
   }
 
   const missing = missingRows(records);
-  const completionFields: (keyof NcbiRecord)[] = ['collectionDate', 'country', 'host', 'laboratory', 'bioProjectAccession', 'bioSampleAccession'];
+  const completionFields: (keyof NcbiRecord)[] = ['collectionDate', 'country', 'host', 'laboratory', 'owner', 'bioProjectAccession', 'bioSampleAccession'];
   const completeness = records.length ? Math.round(completionFields.reduce((sum, field) => sum + present(records, field) / records.length, 0) / completionFields.length * 100) : 0;
   const organisms = countBy(records, 'organism');
   const countries = countBy(records, 'country');
@@ -176,6 +181,7 @@ export default function App() {
   const hosts = countBy(records, 'host');
   const projects = countBy(records, 'bioProjectAccession');
   const labs = countBy(records, 'laboratory');
+  const owners = countBy(records, 'owner');
   const hostLabs = hostLabRows(records);
   const coords = records.filter(r => r.latitude && r.longitude && !Number.isNaN(Number(r.latitude)) && !Number.isNaN(Number(r.longitude)));
 
@@ -197,6 +203,7 @@ export default function App() {
         ['Total Records', String(records.length)],
         ['Unique Organisms', String(unique(records, 'organism'))],
         ['Unique Countries', String(unique(records, 'country'))],
+        ['Unique Owners', String(unique(records, 'owner'))],
         ['Metadata Completeness', `${completeness}%`],
         ['Missing Metadata Records', String(missing.length)],
         ['Duplicates', String(duplicates.length)],
@@ -204,8 +211,8 @@ export default function App() {
       ]
     });
     autoTable(doc, {
-      head: [['Host', 'Records', 'Lab Count', 'Labs']],
-      body: hostLabs.slice(0, 30).map(r => [r.host, String(r.records), String(r.labCount), r.labs])
+      head: [['Host', 'Records', 'Lab Count', 'Owner Count', 'Labs', 'Owners']],
+      body: hostLabs.slice(0, 30).map(r => [r.host, String(r.records), String(r.labCount), String(r.ownerCount), r.labs, r.owners])
     });
     doc.save('ncbi-dashboard-report.pdf');
   }
@@ -222,8 +229,8 @@ export default function App() {
       <div>
         <div className="brand"><Activity /> NCBI XML BioSurveillance Dashboard</div>
         <h1>Browser-only NCBI XML metadata surveillance</h1>
-        <p>Upload BioSample, Assembly, SRA, or GenBank XML files. V2 adds large-file streaming, progress tracking, virtualized exploration, and host-to-laboratory intelligence.</p>
-        <div className="badges"><span>GitHub Pages ready</span><span>Streaming parser</span><span>Large File Mode</span><span>Virtualized 250K+ table</span><span>Host → Labs</span></div>
+        <p>Upload BioSample, Assembly, SRA, or GenBank XML files. V2 adds large-file streaming, progress tracking, virtualized exploration, owner extraction, and host-to-laboratory intelligence.</p>
+        <div className="badges"><span>GitHub Pages ready</span><span>Streaming parser</span><span>Large File Mode</span><span>Virtualized 250K+ table</span><span>Owner attributes</span><span>Host → Labs</span></div>
       </div>
       <button className="theme" onClick={() => setDark(!dark)}>{dark ? <Sun /> : <Moon />} {dark ? 'Light' : 'Dark'}</button>
     </header>
@@ -250,8 +257,10 @@ export default function App() {
         <SummaryCard label="Unique Hosts" value={unique(records, 'host')} />
         <SummaryCard label="Unique BioProjects" value={unique(records, 'bioProjectAccession')} />
         <SummaryCard label="Unique Laboratories" value={unique(records, 'laboratory')} />
+        <SummaryCard label="Unique Owners" value={unique(records, 'owner')} />
         <SummaryCard label="With Collection Date" value={present(records, 'collectionDate').toLocaleString()} />
         <SummaryCard label="With Lab Name" value={present(records, 'laboratory').toLocaleString()} />
+        <SummaryCard label="With Owner" value={present(records, 'owner').toLocaleString()} />
         <SummaryCard label="Missing Metadata" value={missing.length.toLocaleString()} />
       </section>
 
@@ -263,6 +272,7 @@ export default function App() {
           <SummaryCard label="Missing Country" value={(records.length - present(records, 'country')).toLocaleString()} />
           <SummaryCard label="Missing Host" value={(records.length - present(records, 'host')).toLocaleString()} />
           <SummaryCard label="Missing Laboratory" value={(records.length - present(records, 'laboratory')).toLocaleString()} />
+          <SummaryCard label="Missing Owner" value={(records.length - present(records, 'owner')).toLocaleString()} />
           <SummaryCard label="Missing BioProject" value={(records.length - present(records, 'bioProjectAccession')).toLocaleString()} />
         </div>
         <h3>Records requiring curation</h3>
@@ -276,32 +286,33 @@ export default function App() {
         <section className="panel"><h3>Host Distribution</h3><Doughnut data={chartData(hosts)} /></section>
         <section className="panel"><h3>BioProject Distribution</h3><Bar data={chartData(projects)} /></section>
         <section className="panel"><h3>Laboratory Distribution</h3><Bar data={chartData(labs)} /></section>
+        <section className="panel"><h3>Owner Distribution</h3><Bar data={chartData(owners)} /></section>
       </section>}
 
       <section id="map" className="panel map-panel">
         <h2>Geographic Map</h2>
         {coords.length ? <MapContainer center={[20, 0]} zoom={2} scrollWheelZoom className="map">
           <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {coords.slice(0, largeFileMode ? 1000 : 2000).map((r, i) => <Marker key={`${r.id}-${i}`} position={[Number(r.latitude), Number(r.longitude)]} icon={markerIcon}><Popup><b>{r.organism || r.accession}</b><br />{r.country || ''}<br />{r.host || ''}<br />{r.laboratory || r.institution || r.organization || ''}<br />{r.collectionDate || ''}</Popup></Marker>)}
+          {coords.slice(0, largeFileMode ? 1000 : 2000).map((r, i) => <Marker key={`${r.id}-${i}`} position={[Number(r.latitude), Number(r.longitude)]} icon={markerIcon}><Popup><b>{r.organism || r.accession}</b><br />{r.country || ''}<br />{r.host || ''}<br />{r.laboratory || r.institution || r.organization || ''}<br />Owner: {r.owner || ''}<br />{r.collectionDate || ''}</Popup></Marker>)}
         </MapContainer> : <p className="muted">No latitude/longitude coordinates found. Country-level summaries are still available in charts and table.</p>}
       </section>
 
       <section id="explorer" className="panel">
         <h2>Advanced Table Explorer</h2>
         <div className="toolbar">
-          <div className="search"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search all columns" /></div>
+          <div className="search"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search all columns including owner" /></div>
           <select value={filters.organism} onChange={e => setFilters({ ...filters, organism: e.target.value })}><option value="">All organisms</option>{filterOptions.organism.map(([v]) => <option key={v}>{v}</option>)}</select>
           <select value={filters.country} onChange={e => setFilters({ ...filters, country: e.target.value })}><option value="">All countries</option>{filterOptions.country.map(([v]) => <option key={v}>{v}</option>)}</select>
           <select value={filters.host} onChange={e => setFilters({ ...filters, host: e.target.value })}><option value="">All hosts</option>{filterOptions.host.map(([v]) => <option key={v}>{v}</option>)}</select>
           <select value={filters.year} onChange={e => setFilters({ ...filters, year: e.target.value })}><option value="">All years</option>{filterOptions.year.map(([v]) => <option key={v}>{v}</option>)}</select>
         </div>
-        <p className="muted">Showing {filtered.length.toLocaleString()} filtered records using virtualized rendering.</p>
+        <p className="muted">Showing {filtered.length.toLocaleString()} filtered records using virtualized rendering. The Explorer includes the owner field extracted from XML attributes/tags when available.</p>
         <VirtualTable records={filtered} />
       </section>
 
       <section id="hostlabs" className="panel">
         <h2>Host → Laboratory Intelligence</h2>
-        <p className="muted">Each host is summarized with the number of records and the lab names detected from laboratory, institution, or organization fields.</p>
+        <p className="muted">Each host is summarized with the number of records, lab names, and owners detected from XML owner/contact/submitter/organization fields.</p>
         <HostLabTable rows={hostLabs} />
       </section>
 

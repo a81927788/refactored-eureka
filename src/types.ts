@@ -39,8 +39,24 @@ export type NcbiRecord = {
   raw?: Record<string, string>;
 };
 
+export type ParseProgress = {
+  type: 'progress';
+  fileName: string;
+  fileIndex: number;
+  fileCount: number;
+  loadedBytes: number;
+  totalBytes: number;
+  recordsParsed: number;
+  percent: number;
+  largeFileMode: boolean;
+};
+
 export type ParseResult = {
+  type?: 'done';
   records: NcbiRecord[];
   duplicates: NcbiRecord[];
   errors: string[];
+  largeFileMode?: boolean;
 };
+
+export type WorkerMessage = ParseProgress | ParseResult;

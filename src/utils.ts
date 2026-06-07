@@ -1,7 +1,7 @@
 import type { NcbiRecord } from './types';
 
 export const fields: (keyof NcbiRecord)[] = [
-  'sourceFile','fileType','accession','taxonomyId','organism','scientificName','commonName','bioSampleAccession','bioProjectAccession','sraAccession','assemblyAccession','collectionDate','collectionYear','collectionMonth','country','region','city','geoLocation','latitude','longitude','host','hostSpecies','isolationSource','strain','isolate','serotype','serovar','sampleType','laboratory','institution','organization','submitter','submissionDate','publicationDate','lastUpdateDate','recordStatus'
+  'sourceFile','fileType','accession','taxonomyId','organism','scientificName','commonName','bioSampleAccession','bioProjectAccession','sraAccession','assemblyAccession','collectionDate','collectionYear','collectionMonth','country','region','city','geoLocation','latitude','longitude','host','hostSpecies','isolationSource','strain','isolate','serotype','serovar','sampleType','laboratory','institution','organization','owner','submitter','submissionDate','publicationDate','lastUpdateDate','recordStatus'
 ];
 
 export function countBy(records: NcbiRecord[], key: keyof NcbiRecord) {

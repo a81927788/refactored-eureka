@@ -8,6 +8,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Activity, Database, Download, Moon, Search, Sun, UploadCloud, Zap } from 'lucide-react';
 import type { NcbiRecord, ParseProgress, ParseResult, WorkerMessage } from './types';
+import { checkNcbiCounts, retrieveNcbiXmlFiles, type NcbiCountResult, type NcbiDatabase } from './services/ncbi';
 import { countBy, downloadBlob, fields, missingRows, present, toCsv, unique } from './utils';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, PointElement, LineElement, Tooltip, Legend);
@@ -21,6 +22,67 @@ const markerIcon = new L.Icon({
 });
 
 const tableFields = ['accession','organism','taxonomyId','bioSampleAccession','bioProjectAccession','collectionDate','country','region','city','host','laboratory','institution','organization','owner','isolationSource','sourceFile'] as (keyof NcbiRecord)[];
+
+type TextUpload = { name: string; text: string; size?: number };
+
+type RetrievalPanelProps = {
+  taxid: string;
+  setTaxid: (value: string) => void;
+  includeSubTaxa: boolean;
+  setIncludeSubTaxa: (value: boolean) => void;
+  retrievalDbs: Record<NcbiDatabase, boolean>;
+  setRetrievalDbs: React.Dispatch<React.SetStateAction<Record<NcbiDatabase, boolean>>>;
+  maxRecords: number;
+  setMaxRecords: (value: number) => void;
+  batchSize: number;
+  setBatchSize: (value: number) => void;
+  ncbiEmail: string;
+  setNcbiEmail: (value: string) => void;
+  ncbiApiKey: string;
+  setNcbiApiKey: (value: string) => void;
+  counts: NcbiCountResult[];
+  retrievalStatus: string;
+  retrievalPercent: number;
+  retrieving: boolean;
+  onCheckCounts: () => void;
+  onRetrieve: () => void;
+};
+
+function selectedDatabases(dbs: Record<NcbiDatabase, boolean>): NcbiDatabase[] {
+  return (Object.entries(dbs).filter(([, selected]) => selected).map(([db]) => db) as NcbiDatabase[]);
+}
+
+function RetrievalPanel(props: RetrievalPanelProps) {
+  const selected = selectedDatabases(props.retrievalDbs);
+  return <section className="panel ncbi-retrieval">
+    <div className="panel-heading">
+      <div>
+        <h2>Mode A: Retrieve from NCBI by TaxID</h2>
+        <p className="muted">Experimental browser-only retrieval for BioSample and Assembly metadata. Best for small/medium tests before moving to local scripts or a backend.</p>
+      </div>
+      <Database />
+    </div>
+    <div className="retrieval-grid">
+      <label>TaxID<input value={props.taxid} onChange={e => props.setTaxid(e.target.value.replace(/[^0-9]/g, ''))} placeholder="e.g. 29459" /></label>
+      <label>Max records<input type="number" min={1} max={10000} value={props.maxRecords} onChange={e => props.setMaxRecords(Number(e.target.value) || 1000)} /></label>
+      <label>Batch size<input type="number" min={20} max={500} value={props.batchSize} onChange={e => props.setBatchSize(Number(e.target.value) || 200)} /></label>
+      <label>NCBI email optional<input value={props.ncbiEmail} onChange={e => props.setNcbiEmail(e.target.value)} placeholder="name@example.com" /></label>
+      <label>API key optional<input value={props.ncbiApiKey} onChange={e => props.setNcbiApiKey(e.target.value)} placeholder="optional" /></label>
+    </div>
+    <div className="check-row">
+      <label><input type="checkbox" checked={props.includeSubTaxa} onChange={e => props.setIncludeSubTaxa(e.target.checked)} /> Include sub taxa with txid[Organism:exp]</label>
+      <label><input type="checkbox" checked={props.retrievalDbs.biosample} onChange={e => props.setRetrievalDbs(prev => ({ ...prev, biosample: e.target.checked }))} /> BioSample</label>
+      <label><input type="checkbox" checked={props.retrievalDbs.assembly} onChange={e => props.setRetrievalDbs(prev => ({ ...prev, assembly: e.target.checked }))} /> Assembly</label>
+    </div>
+    <div className="exports">
+      <button className="button" disabled={!props.taxid || selected.length === 0 || props.retrieving} onClick={props.onCheckCounts}>Check Counts</button>
+      <button className="button" disabled={!props.taxid || selected.length === 0 || props.retrieving} onClick={props.onRetrieve}>Retrieve Metadata</button>
+    </div>
+    {props.retrieving && <div className="progress-bar"><div style={{ width: `${props.retrievalPercent}%` }} /></div>}
+    {props.retrievalStatus && <p className="muted">{props.retrievalStatus}</p>}
+    {props.counts.length > 0 && <div className="table-wrap small-table"><table><thead><tr><th>Database</th><th>Count</th><th>Status</th></tr></thead><tbody>{props.counts.map(row => <tr key={row.db}><td>{row.db}</td><td>{row.count.toLocaleString()}</td><td>{row.error || 'OK'}</td></tr>)}</tbody></table></div>}
+  </section>;
+}
 
 function chartData(pairs: [string, number][], label = 'Records') {
   const top = pairs.slice(0, 12);
@@ -137,6 +199,17 @@ export default function App() {
   const [dark, setDark] = React.useState(localStorage.theme === 'dark');
   const [query, setQuery] = React.useState('');
   const [filters, setFilters] = React.useState({ organism: '', country: '', host: '', year: '' });
+  const [taxid, setTaxid] = React.useState('');
+  const [includeSubTaxa, setIncludeSubTaxa] = React.useState(true);
+  const [retrievalDbs, setRetrievalDbs] = React.useState<Record<NcbiDatabase, boolean>>({ biosample: true, assembly: true });
+  const [maxRecords, setMaxRecords] = React.useState(1000);
+  const [batchSize, setBatchSize] = React.useState(200);
+  const [ncbiEmail, setNcbiEmail] = React.useState('');
+  const [ncbiApiKey, setNcbiApiKey] = React.useState('');
+  const [counts, setCounts] = React.useState<NcbiCountResult[]>([]);
+  const [retrieving, setRetrieving] = React.useState(false);
+  const [retrievalStatus, setRetrievalStatus] = React.useState('');
+  const [retrievalPercent, setRetrievalPercent] = React.useState(0);
 
   React.useEffect(() => {
     document.body.className = dark ? 'dark' : 'light';
@@ -155,6 +228,41 @@ export default function App() {
     });
     setFiltered(next);
   }, [query, filters, records]);
+
+  async function parseTextUploads(files: TextUpload[]) {
+    return new Promise<void>((resolve, reject) => {
+      setLoading(true);
+      setErrors([]);
+      setProgress(null);
+      setLargeFileMode(files.some(file => (file.size || 0) > 25 * 1024 * 1024));
+      const worker = new Worker(new URL('./workers/parserWorker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
+        if ('type' in event.data && event.data.type === 'progress') {
+          setProgress(event.data);
+          if (event.data.largeFileMode) setLargeFileMode(true);
+          return;
+        }
+        const result = event.data as ParseResult;
+        setRecords(result.records);
+        setFiltered(result.records);
+        setDuplicates(result.duplicates);
+        setErrors(result.errors);
+        setLargeFileMode(Boolean(result.largeFileMode) || result.records.length >= 50000);
+        setLoading(false);
+        setProgress(null);
+        worker.terminate();
+        resolve();
+      };
+      worker.onerror = event => {
+        setErrors([event.message]);
+        setLoading(false);
+        setProgress(null);
+        worker.terminate();
+        reject(new Error(event.message));
+      };
+      worker.postMessage({ files });
+    });
+  }
 
   async function handleFiles(fileList: FileList | File[]) {
     const files = Array.from(fileList);
@@ -186,6 +294,53 @@ export default function App() {
       worker.terminate();
     };
     worker.postMessage({ files });
+  }
+
+  async function handleCheckCounts() {
+    const dbs = selectedDatabases(retrievalDbs);
+    setRetrieving(true);
+    setRetrievalStatus('Checking NCBI counts...');
+    setRetrievalPercent(15);
+    try {
+      const result = await checkNcbiCounts(taxid, includeSubTaxa, dbs, ncbiEmail, ncbiApiKey);
+      setCounts(result);
+      setRetrievalStatus('Counts loaded. Review counts before retrieving large datasets.');
+      setRetrievalPercent(100);
+    } catch (error) {
+      setRetrievalStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRetrieving(false);
+    }
+  }
+
+  async function handleRetrieveFromNcbi() {
+    const dbs = selectedDatabases(retrievalDbs);
+    setRetrieving(true);
+    setRetrievalPercent(0);
+    setRetrievalStatus('Starting NCBI retrieval...');
+    try {
+      const files = await retrieveNcbiXmlFiles({
+        taxid,
+        includeSubTaxa,
+        databases: dbs,
+        maxRecords,
+        batchSize,
+        email: ncbiEmail,
+        apiKey: ncbiApiKey,
+        onProgress: (message, percent) => {
+          setRetrievalStatus(message);
+          setRetrievalPercent(percent);
+        }
+      });
+      await parseTextUploads(files);
+      setRetrievalStatus(`Retrieved and parsed ${files.length} XML dataset(s) for TaxID ${taxid}.`);
+      setRetrievalPercent(100);
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : String(error)]);
+      setRetrievalStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRetrieving(false);
+    }
   }
 
   const missing = missingRows(records);
@@ -245,11 +400,34 @@ export default function App() {
       <div>
         <div className="brand"><Activity /> NCBI XML BioSurveillance Dashboard</div>
         <h1>Browser-only NCBI XML metadata surveillance</h1>
-        <p>Upload BioSample, Assembly, SRA, or GenBank XML files. V2 adds large-file streaming, progress tracking, virtualized exploration, owner extraction, and host-to-laboratory intelligence.</p>
-        <div className="badges"><span>GitHub Pages ready</span><span>Streaming parser</span><span>Large File Mode</span><span>Virtualized 250K+ table</span><span>Owner attributes</span><span>Host → Labs</span></div>
+        <p>Upload XML files manually or retrieve BioSample and Assembly metadata from NCBI by TaxID. V3 Mode A adds browser-based TaxID retrieval for quick testing.</p>
+        <div className="badges"><span>GitHub Pages ready</span><span>Streaming parser</span><span>Large File Mode</span><span>Virtualized 250K+ table</span><span>TaxID Retrieval</span><span>Host → Labs</span></div>
       </div>
       <button className="theme" onClick={() => setDark(!dark)}>{dark ? <Sun /> : <Moon />} {dark ? 'Light' : 'Dark'}</button>
     </header>
+
+    <RetrievalPanel
+      taxid={taxid}
+      setTaxid={setTaxid}
+      includeSubTaxa={includeSubTaxa}
+      setIncludeSubTaxa={setIncludeSubTaxa}
+      retrievalDbs={retrievalDbs}
+      setRetrievalDbs={setRetrievalDbs}
+      maxRecords={maxRecords}
+      setMaxRecords={setMaxRecords}
+      batchSize={batchSize}
+      setBatchSize={setBatchSize}
+      ncbiEmail={ncbiEmail}
+      setNcbiEmail={setNcbiEmail}
+      ncbiApiKey={ncbiApiKey}
+      setNcbiApiKey={setNcbiApiKey}
+      counts={counts}
+      retrieving={retrieving}
+      retrievalStatus={retrievalStatus}
+      retrievalPercent={retrievalPercent}
+      onCheckCounts={handleCheckCounts}
+      onRetrieve={handleRetrieveFromNcbi}
+    />
 
     <section className="panel upload" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
       <UploadCloud size={44} />

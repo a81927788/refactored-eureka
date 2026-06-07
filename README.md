@@ -12,22 +12,6 @@ A fully static, browser-only dashboard for NCBI XML metadata surveillance.
 - Generate summary cards, metadata quality metrics, charts, map, table explorer, duplicate/orphan checks, and exports.
 - Export CSV, XLSX, and PDF reports.
 
-## GitHub Pages deployment
-
-This ZIP already includes a built `docs/` folder.
-
-1. Upload the full project to your GitHub repository.
-2. Go to **Settings → Pages**.
-3. Choose **Deploy from a branch**.
-4. Select branch: `main`.
-5. Select folder: `/docs`.
-6. Save.
-
-The site will be available at:
-
-```text
-https://YOUR_USERNAME.github.io/YOUR_REPOSITORY/
-```
 
 ## Local development
 

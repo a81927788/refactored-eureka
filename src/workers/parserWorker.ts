@@ -1,10 +1,13 @@
-import type { NcbiRecord, ParseResult } from '../types';
+import type { NcbiRecord, ParseProgress, ParseResult } from '../types';
 
-type UploadFile = { name: string; text: string };
+type UploadFile = File | { name: string; text: string; size?: number };
+
+const LARGE_FILE_BYTES = 25 * 1024 * 1024;
+const LARGE_FILE_RECORDS = 50000;
 
 function clean(value?: string | null): string | undefined {
-  const out = (value || '').replace(/\s+/g, ' ').trim();
-  if (!out || out.toLowerCase() === 'missing' || out.toLowerCase() === 'not provided') return undefined;
+  const out = (value || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
+  if (!out || ['missing', 'not provided', 'not collected', 'unknown', 'na', 'n/a'].includes(out.toLowerCase())) return undefined;
   return out;
 }
 
@@ -30,12 +33,24 @@ function blocks(xml: string, name: string): string[] {
   return out;
 }
 
+function completeBlocks(buffer: string, name: string): { items: string[]; rest: string } {
+  const re = new RegExp(`<(?:[A-Za-z0-9_\\-]+:)?${name}\\b[^>]*>[\\s\\S]*?<\\/(?:[A-Za-z0-9_\\-]+:)?${name}>`, 'gi');
+  const items: string[] = [];
+  let lastEnd = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(buffer))) {
+    items.push(match[0]);
+    lastEnd = re.lastIndex;
+  }
+  return { items, rest: lastEnd ? buffer.slice(lastEnd) : buffer };
+}
+
 function attributes(block: string): Record<string, string> {
   const out: Record<string, string> = {};
   const re = /<(?:[A-Za-z0-9_\-]+:)?Attribute\b([^>]*)>([\s\S]*?)<\/(?:[A-Za-z0-9_\-]+:)?Attribute>/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(block))) {
-    const key = attr(match[1], 'attribute_name') || attr(match[1], 'harmonized_name') || attr(match[1], 'display_name') || attr(match[1], 'name');
+    const key = attr(match[1], 'harmonized_name') || attr(match[1], 'attribute_name') || attr(match[1], 'display_name') || attr(match[1], 'name');
     const value = stripTags(match[2]);
     if (key && value) out[key.toLowerCase()] = value;
   }
@@ -90,14 +105,26 @@ function detect(xml: string): string {
   return 'Generic';
 }
 
+function ownerValue(block: string, attrs: Record<string, string>): string | undefined {
+  return pick(attrs, [
+    'owner', 'owner name', 'owner_name', 'sample owner', 'data owner', 'contact', 'contact name',
+    'submitter_name', 'submitter name', 'submitter', 'organization', 'submitter organization',
+    'institution', 'institute', 'center name', 'sequencing center'
+  ]) || tag(block, 'Owner') || tag(block, 'Contact') || tag(block, 'Submitter') || tag(block, 'Organization') || tag(block, 'CENTER_NAME');
+}
+
 function parseBioSample(block: string, sourceFile: string, index: number): NcbiRecord {
   const a = attributes(block);
   const geoValue = pick(a, ['geo_loc_name', 'geographic location', 'country']);
-  const collectionDate = pick(a, ['collection_date', 'collection date', 'sample collection date']);
+  const collectionDate = pick(a, ['collection_date', 'collection date', 'sample collection date', 'date collected']);
   const organism = tag(block, 'OrganismName') || attr(block, 'taxonomy_name') || pick(a, ['organism', 'scientific name']);
   const accession = attr(block, 'accession') || tag(block, 'Accession') || id(block, /SAM[NED][A-Z]?\d+/);
-  const latlonValue = pick(a, ['lat_lon', 'latitude and longitude']);
-  const record: NcbiRecord = {
+  const latlonValue = pick(a, ['lat_lon', 'latitude and longitude', 'lat lon']);
+  const laboratory = pick(a, ['lab', 'laboratory', 'collecting lab', 'collected by', 'sequencing center', 'center name', 'submitter lab']);
+  const organization = tag(block, 'Organization') || pick(a, ['organization', 'submitter organization', 'center name']);
+  const submitter = tag(block, 'Submitter') || pick(a, ['submitter', 'submitter name', 'submitter_name']);
+  const owner = ownerValue(block, a);
+  return {
     id: `${sourceFile}-${index}`,
     sourceFile,
     fileType: 'BioSample',
@@ -107,13 +134,13 @@ function parseBioSample(block: string, sourceFile: string, index: number): NcbiR
     organism,
     scientificName: organism,
     commonName: pick(a, ['common name']),
-    bioProjectAccession: tag(block, 'BioProject') || pick(a, ['bioproject']) || id(block, /PRJ[ENDA][A-Z]?\d+/),
+    bioProjectAccession: tag(block, 'BioProject') || pick(a, ['bioproject', 'bioproject accession']) || id(block, /PRJ[ENDA][A-Z]?\d+/),
     sraAccession: id(block, /SR[APRX]\d+/),
     assemblyAccession: id(block, /GC[AF]_\d+\.\d+/),
     collectionDate,
     collectionYear: year(collectionDate),
     collectionMonth: month(collectionDate),
-    host: pick(a, ['host', 'host common name']),
+    host: pick(a, ['host', 'host common name', 'host name']),
     hostSpecies: pick(a, ['host scientific name', 'host species']),
     isolationSource: pick(a, ['isolation_source', 'isolation source']),
     strain: pick(a, ['strain']),
@@ -121,10 +148,11 @@ function parseBioSample(block: string, sourceFile: string, index: number): NcbiR
     serotype: pick(a, ['serotype']),
     serovar: pick(a, ['serovar']),
     sampleType: pick(a, ['sample_type', 'sample type', 'env_broad_scale']),
-    laboratory: pick(a, ['lab', 'laboratory', 'collecting lab']),
-    institution: pick(a, ['institution']),
-    organization: tag(block, 'Organization') || pick(a, ['organization']),
-    submitter: tag(block, 'Submitter') || pick(a, ['submitter']),
+    laboratory,
+    institution: pick(a, ['institution', 'institute', 'affiliation']),
+    organization,
+    owner,
+    submitter,
     submissionDate: attr(block, 'submission_date') || tag(block, 'SubmissionDate'),
     publicationDate: attr(block, 'publication_date') || tag(block, 'PublicationDate'),
     lastUpdateDate: attr(block, 'last_update') || attr(block, 'last_update_date'),
@@ -133,7 +161,6 @@ function parseBioSample(block: string, sourceFile: string, index: number): NcbiR
     ...geo(geoValue),
     ...latlon(latlonValue || geoValue)
   };
-  return record;
 }
 
 function parseGeneric(block: string, sourceFile: string, index: number, fileType: string): NcbiRecord {
@@ -141,6 +168,9 @@ function parseGeneric(block: string, sourceFile: string, index: number, fileType
   const geoValue = pick(a, ['geo_loc_name', 'country']);
   const collectionDate = pick(a, ['collection_date', 'collection date']);
   const organism = tag(block, 'Organism') || tag(block, 'ScientificName') || tag(block, 'GBSeq_organism') || pick(a, ['organism']);
+  const organization = tag(block, 'CENTER_NAME') || tag(block, 'Submitter') || pick(a, ['organization']);
+  const submitter = tag(block, 'Submitter') || pick(a, ['submitter', 'submitter name', 'submitter_name']);
+  const owner = ownerValue(block, a);
   return {
     id: `${sourceFile}-${index}`,
     sourceFile,
@@ -159,8 +189,10 @@ function parseGeneric(block: string, sourceFile: string, index: number, fileType
     host: pick(a, ['host']),
     isolationSource: pick(a, ['isolation_source', 'isolation source']),
     strain: pick(a, ['strain']),
-    organization: tag(block, 'CENTER_NAME') || tag(block, 'Submitter'),
-    submitter: tag(block, 'Submitter'),
+    laboratory: pick(a, ['lab', 'laboratory', 'collecting lab', 'sequencing center', 'center name']),
+    organization,
+    owner,
+    submitter,
     submissionDate: tag(block, 'SubmissionDate') || tag(block, 'CREATE_DATE'),
     lastUpdateDate: tag(block, 'UPDATE_DATE') || tag(block, 'LastUpdateDate'),
     recordStatus: tag(block, 'Status'),
@@ -169,7 +201,7 @@ function parseGeneric(block: string, sourceFile: string, index: number, fileType
   };
 }
 
-function parseXml(xml: string, sourceFile: string): NcbiRecord[] {
+function parseBlocks(xml: string, sourceFile: string): NcbiRecord[] {
   const fileType = detect(xml);
   let selected: string[] = [];
   if (fileType === 'BioSample') selected = blocks(xml, 'BioSample');
@@ -177,37 +209,96 @@ function parseXml(xml: string, sourceFile: string): NcbiRecord[] {
   if (fileType === 'Nucleotide/GenBank') selected = blocks(xml, 'GBSeq');
   if (fileType === 'Assembly') selected = [...blocks(xml, 'DocumentSummary'), ...blocks(xml, 'Assembly')];
   if (!selected.length) selected = [xml];
-
-  const records: NcbiRecord[] = [];
-  selected.forEach((block, index) => {
-    try {
-      const record = fileType === 'BioSample'
-        ? parseBioSample(block, sourceFile, index)
-        : parseGeneric(block, sourceFile, index, fileType);
-      if (record.accession || record.bioSampleAccession || record.organism) records.push(record);
-    } catch {
-      // Skip malformed record chunks while keeping the rest of the file usable.
-    }
-  });
-  return records;
+  return selected.map((block, index) => fileType === 'BioSample' ? parseBioSample(block, sourceFile, index) : parseGeneric(block, sourceFile, index, fileType)).filter(r => r.accession || r.bioSampleAccession || r.organism);
 }
 
 function duplicateKey(record: NcbiRecord): string {
   return record.bioSampleAccession || record.accession || [record.bioProjectAccession, record.organism, record.collectionDate].filter(Boolean).join('|') || [record.taxonomyId, record.strain, record.collectionDate].filter(Boolean).join('|') || record.id;
 }
 
-self.onmessage = (event: MessageEvent<{ files: UploadFile[] }>) => {
+function sendProgress(progress: ParseProgress) {
+  postMessage(progress);
+}
+
+async function parseUpload(file: UploadFile, fileIndex: number, fileCount: number): Promise<{ records: NcbiRecord[]; errors: string[]; largeFileMode: boolean }> {
+  const name = file.name;
+  const size = 'size' in file && file.size ? file.size : ('text' in file ? file.text.length : 0);
+  const largeFileMode = size >= LARGE_FILE_BYTES;
+  const records: NcbiRecord[] = [];
+  const errors: string[] = [];
+
+  if ('stream' in file && typeof file.stream === 'function') {
+    const decoder = new TextDecoder();
+    const reader = file.stream().getReader();
+    let loadedBytes = 0;
+    let buffer = '';
+    let fileType = '';
+    let genericXml = '';
+    let index = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      loadedBytes += value.byteLength;
+      const chunk = decoder.decode(value, { stream: true });
+      buffer += chunk;
+      if (!fileType && buffer.length > 5000) fileType = detect(buffer);
+
+      if (fileType === 'BioSample') {
+        const pulled = completeBlocks(buffer, 'BioSample');
+        buffer = pulled.rest;
+        for (const block of pulled.items) {
+          try {
+            const record = parseBioSample(block, name, index++);
+            if (record.accession || record.bioSampleAccession || record.organism) records.push(record);
+          } catch {
+            errors.push(`${name}: skipped malformed BioSample chunk near record ${index}`);
+          }
+        }
+      } else if (largeFileMode) {
+        genericXml += chunk;
+      }
+
+      sendProgress({ type: 'progress', fileName: name, fileIndex, fileCount, loadedBytes, totalBytes: size, recordsParsed: records.length, percent: size ? Math.min(99, Math.round((loadedBytes / size) * 100)) : 0, largeFileMode });
+    }
+
+    buffer += decoder.decode();
+    fileType = fileType || detect(buffer || genericXml);
+    if (fileType === 'BioSample') {
+      const tail = completeBlocks(buffer, 'BioSample');
+      for (const block of tail.items) {
+        const record = parseBioSample(block, name, index++);
+        if (record.accession || record.bioSampleAccession || record.organism) records.push(record);
+      }
+    } else {
+      records.push(...parseBlocks(genericXml || buffer, name));
+    }
+
+    sendProgress({ type: 'progress', fileName: name, fileIndex, fileCount, loadedBytes: size, totalBytes: size, recordsParsed: records.length, percent: 100, largeFileMode: largeFileMode || records.length >= LARGE_FILE_RECORDS });
+    if (!records.length) errors.push(`${name}: no recognizable NCBI records found`);
+    return { records, errors, largeFileMode: largeFileMode || records.length >= LARGE_FILE_RECORDS };
+  }
+
+  const text = 'text' in file ? file.text : '';
+  records.push(...parseBlocks(text, name));
+  if (!records.length) errors.push(`${name}: no recognizable NCBI records found`);
+  return { records, errors, largeFileMode: largeFileMode || records.length >= LARGE_FILE_RECORDS };
+}
+
+self.onmessage = async (event: MessageEvent<{ files: UploadFile[] }>) => {
   const records: NcbiRecord[] = [];
   const duplicates: NcbiRecord[] = [];
   const errors: string[] = [];
+  let largeFileMode = false;
 
-  for (const file of event.data.files || []) {
+  for (let i = 0; i < (event.data.files || []).length; i++) {
     try {
-      const parsed = parseXml(file.text, file.name);
-      if (!parsed.length) errors.push(`${file.name}: no recognizable NCBI records found`);
-      records.push(...parsed);
+      const parsed = await parseUpload(event.data.files[i], i + 1, event.data.files.length);
+      records.push(...parsed.records);
+      errors.push(...parsed.errors);
+      largeFileMode = largeFileMode || parsed.largeFileMode;
     } catch (error) {
-      errors.push(`${file.name}: ${error instanceof Error ? error.message : String(error)}`);
+      errors.push(`${event.data.files[i]?.name || 'file'}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -218,6 +309,6 @@ self.onmessage = (event: MessageEvent<{ files: UploadFile[] }>) => {
     else unique.set(key, record);
   }
 
-  const result: ParseResult = { records: [...unique.values()], duplicates, errors };
+  const result: ParseResult = { type: 'done', records: [...unique.values()], duplicates, errors, largeFileMode: largeFileMode || records.length >= LARGE_FILE_RECORDS };
   postMessage(result);
 };
